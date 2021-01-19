@@ -42,9 +42,21 @@
      (HERE left right)]))
 
 (define OUTPUT-GREEN "\e[32m")
-(define set-red "\e[31m")
-(define set-blue "\e[36m")
+(define OUTPUT-RED "\e[31m")
+(define OUTPUT-BLUE "\e[36m")
 (define RESET-OUTPUT-COLOR "\e[0m")
+
+;; string escape-sequence escape-sequence -> string
+;; sets color of string to new-color, and resets to current-color after
+(define (colorize new-color s current-color)
+  (string-append new-color s current-color))
+
+(define greenify ((curry colorize) OUTPUT-GREEN))
+(displayln (greenify "hello in green" RESET-OUTPUT-COLOR))
+(displayln "back to default color")
+
+(define (blue s) (colorize OUTPUT-BLUE s RESET-OUTPUT-COLOR))
+(define (red s) (colorize OUTPUT-RED s RESET-OUTPUT-COLOR))
 
 ;; used to repeat a string n times as a new string.
 ;; like the * method in ruby.
@@ -74,8 +86,8 @@
                  "\n")
   )
 
-(define format-left ((curry format-difference) set-blue))
-(define format-right ((curry format-difference) set-red))
+(define format-left ((curry format-difference) OUTPUT-BLUE))
+(define format-right ((curry format-difference) OUTPUT-RED))
 
 (define (stringify sexpr)
   (pretty-format sexpr #:mode 'display))
@@ -105,14 +117,6 @@
         "\n"
         OUTPUT-GREEN
         )]
-      #;
-      (match head
-        [(HERE left right)
-         (string-append  (diff-colorize-rec left indent-depth)
-                         (diff-colorize-rec tail indent-depth))
-         (string-append (diff-colorize-rec right indent-depth)
-                        (diff-colorize-rec tail indent-depth))]
-        [head (string-append (diff-colorize-rec head indent-depth) (diff-colorize-rec tail indent-depth))])
       ;; Cases
       ;; head and tail are one-of:
       ;;   (HERE left right)
@@ -136,15 +140,6 @@
      RESET-OUTPUT-COLOR))
   
   (diff-colorize-main tree))
-
-;; string escape-sequence escape-sequence -> string
-;; sets color of string to new-color, and resets to current-color after
-(define (colorize new-color s current-color)
-  (string-append new-color s current-color))
-
-(define greenify ((curry colorize) OUTPUT-GREEN))
-(displayln (greenify "hello in green" RESET-OUTPUT-COLOR))
-(displayln "back to default color")
 
 (define show-diff (compose displayln diff-colorize diff))
 #;
