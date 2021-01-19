@@ -1,6 +1,8 @@
+#! /usr/bin/racket
 #lang racket
 (require rackunit)
 (require plai/datatype)
+(require racket/format)
 (provide (all-defined-out))
 
 (define (or? . preds)
@@ -8,16 +10,18 @@
 
 
 ;; s-expr is one-of:
-;; '()
-;; symbol
+;; the empty list: '()
+;; a symbol
 ;; (cons atom s-expr)
 
 ;; diff-output is one-of:
 ;; s-expr
-;; (HERE)
+;; (HERE s-expr s-expr)
+;; complex s-expr with a HERE marker somewhere inside it.
 (define-type diff-output
+  ;; diff-marker
   [HERE (left any/c) (right any/c)]
-  [OK (inner any/c)]
+  ;; otherwise it's just the expression itself
   )
 
 ;; s-expr s-expr -> diff-output
@@ -37,30 +41,83 @@
 (define set-blue "\e[36m")
 (define reset-color "\e[0m")
 
+;; used to repeat a string n times as a new string.
+;; like the * method in ruby.
+(define (*str s n)
+  (cond
+    [(<= n 0) ""]
+    [else
+     (string-append s (*str s (- n 1)))]
+    )
+  )
 
+(define INDENT (*str " " 2))
+
+;; number string -> string
+(define (indent-to indent-depth str)
+  (let ([lines (string-split str "\n")])
+    (string-join (map (λ (s) (string-append (*str INDENT indent-depth)
+                                             s))
+                      lines)
+                 "\n")))
+
+;; (color escape marker) s-expr number -> str
+(define (format-difference color expr indent-depth)
+  (string-append color
+                 (indent-to (add1 indent-depth)
+                            (pretty-format expr #:mode 'display))
+                 "\n")
+  )
+
+(define format-left ((curry format-difference) set-green))
+(define format-right ((curry format-difference) set-red))
+
+;; diff-output -> string
 (define (diff-colorize tree)
-  (define (diff-colorize-rec tree)
+  (define (diff-colorize-rec tree indent-depth)
     (match tree
       [(HERE left right)
-       (~a set-blue
-           (~a left)
-           set-red
-           (~a right)
-           set-green
-           #:separator "\n")]
-       
-      [(cons head tail)  (cons (diff-colorize-rec head) (diff-colorize-rec tail))]
-      [atom atom]
+       (pretty-format 
+        (string-append
+         "\n"
+         (indent-to indent-depth (format-left left indent-depth))
+         "\n"
+         (indent-to indent-depth (format-right right indent-depth))
+         set-green
+         )
+        #:mode 'display)]
+      ;; Cases
+      ;; head is one-of:
+      ;;   (HERE left right)
+      ;;   s-expr containing diff-marker somewhere within
+      ;;   s-expr containing no diff-markers
+      [(cons head tail)
+       (cons (diff-colorize-rec head indent-depth)
+             (diff-colorize-rec tail indent-depth))]
+      ;;  should match anything
+      [atom (indent-to indent-depth (pretty-format atom #:mode 'display))]
+      ;; should be impossible
       [else
        (error "unexpected case")]))
   
-   (~a
-    set-green
-     (diff-colorize-rec tree)
-            reset-color
-       
-  #:separator "\n"))
+  (define (diff-colorize-main tree)
+    (string-append
+     set-green
+     (pretty-format
+      (diff-colorize-rec tree 0)
+      #:mode 'display)
+     reset-color))
+  
+  (diff-colorize-main tree))
 
+;; string escape-sequence escape-sequence -> string
+;; sets color of string to new-color, and resets to current-color after
+(define (colorize s new-color current-color)
+  (string-append new-color s current-color))
+
+(define greenify ((curry colorize) set-green))
+(displayln (greenify "hello in green" reset-color))
+(displayln "back to default color")
 
 (define show-diff (compose displayln diff-colorize diff))
 #;
@@ -98,11 +155,13 @@
               (same '(but different))))
 
 (show-diff '(first (second)
-                              (third something))
-                      '(first (second)
-                              (third (something-else))))
+                   (third something))
+           '(first (second)
+                   (third (something-else))))
+
+(show-diff '(same up to here then (HERE different stuff))
+           '(same up to here then (different stuff)))
 
 
 
 
-;; 
