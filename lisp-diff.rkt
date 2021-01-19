@@ -29,17 +29,22 @@
 (define (diff left right)
   (match `(,left ,right)
     [`(,same ,same) same]
-    [`(,(cons head ltail) ,(cons head rtail))
-     (cons head (diff ltail rtail))]
+    [`(,(cons same-head ltail) ,(cons same-head rtail))
+     (cons same-head (diff ltail rtail))]
     [`(,(cons lhead ltail) ,(cons rhead rtail))
      (cons (diff lhead rhead) (diff ltail rtail))]
+    #;[`(,(cons lhead same-tail)
+         ,(cons rhead same-tail))
+       (let ([head-diff (diff lhead rhead)])
+         (cons head-diff tail))
+       ]
     [else
      (HERE left right)]))
 
-(define set-green "\e[32m")
+(define OUTPUT-GREEN "\e[32m")
 (define set-red "\e[31m")
 (define set-blue "\e[36m")
-(define reset-color "\e[0m")
+(define RESET-OUTPUT-COLOR "\e[0m")
 
 ;; used to repeat a string n times as a new string.
 ;; like the * method in ruby.
@@ -57,7 +62,7 @@
 (define (indent-to indent-depth str)
   (let ([lines (string-split str "\n")])
     (string-join (map (λ (s) (string-append (*str INDENT indent-depth)
-                                             s))
+                                            s))
                       lines)
                  "\n")))
 
@@ -65,29 +70,51 @@
 (define (format-difference color expr indent-depth)
   (string-append color
                  (indent-to (add1 indent-depth)
-                            (pretty-format expr #:mode 'display))
+                            (stringify expr))
                  "\n")
   )
 
-(define format-left ((curry format-difference) set-green))
+(define format-left ((curry format-difference) set-blue))
 (define format-right ((curry format-difference) set-red))
+
+(define (stringify sexpr)
+  (pretty-format sexpr #:mode 'display))
 
 ;; diff-output -> string
 (define (diff-colorize tree)
+  ;; diff-output -> string OR s-expr
   (define (diff-colorize-rec tree indent-depth)
     (match tree
+      ;; special cases to handle the end of a list
+      [(HERE '() right)
+       (list (string-append "\n"
+                            (format-left '() indent-depth)
+                            (format-right right indent-depth)
+                            OUTPUT-GREEN))]
+      [(HERE left '())
+       (list (string-append "\n"
+                            (format-left left indent-depth)
+                            (format-right '() indent-depth)
+                            OUTPUT-GREEN))]
       [(HERE left right)
-       (pretty-format 
-        (string-append
-         "\n"
-         (indent-to indent-depth (format-left left indent-depth))
-         "\n"
-         (indent-to indent-depth (format-right right indent-depth))
-         set-green
-         )
-        #:mode 'display)]
+       (string-append
+        "\n"
+        (indent-to (add1 indent-depth) (format-left left indent-depth))
+        "\n"
+        (indent-to (add1 indent-depth) (format-right right indent-depth))
+        "\n"
+        OUTPUT-GREEN
+        )]
+      #;
+      (match head
+        [(HERE left right)
+         (string-append  (diff-colorize-rec left indent-depth)
+                         (diff-colorize-rec tail indent-depth))
+         (string-append (diff-colorize-rec right indent-depth)
+                        (diff-colorize-rec tail indent-depth))]
+        [head (string-append (diff-colorize-rec head indent-depth) (diff-colorize-rec tail indent-depth))])
       ;; Cases
-      ;; head is one-of:
+      ;; head and tail are one-of:
       ;;   (HERE left right)
       ;;   s-expr containing diff-marker somewhere within
       ;;   s-expr containing no diff-markers
@@ -95,28 +122,28 @@
        (cons (diff-colorize-rec head indent-depth)
              (diff-colorize-rec tail indent-depth))]
       ;;  should match anything
-      [atom (indent-to indent-depth (pretty-format atom #:mode 'display))]
+      [atom atom]
       ;; should be impossible
       [else
        (error "unexpected case")]))
   
   (define (diff-colorize-main tree)
     (string-append
-     set-green
+     OUTPUT-GREEN
      (pretty-format
       (diff-colorize-rec tree 0)
       #:mode 'display)
-     reset-color))
+     RESET-OUTPUT-COLOR))
   
   (diff-colorize-main tree))
 
 ;; string escape-sequence escape-sequence -> string
 ;; sets color of string to new-color, and resets to current-color after
-(define (colorize s new-color current-color)
+(define (colorize new-color s current-color)
   (string-append new-color s current-color))
 
-(define greenify ((curry colorize) set-green))
-(displayln (greenify "hello in green" reset-color))
+(define greenify ((curry colorize) OUTPUT-GREEN))
+(displayln (greenify "hello in green" RESET-OUTPUT-COLOR))
 (displayln "back to default color")
 
 (define show-diff (compose displayln diff-colorize diff))
@@ -161,6 +188,8 @@
 
 (show-diff '(same up to here then (HERE different stuff))
            '(same up to here then (different stuff)))
+(show-diff '(when the head is different and the tail is the same)
+           '(but the head is different and the tail is the same))
 
 
 
