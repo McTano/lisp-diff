@@ -168,6 +168,9 @@
 (define (double expr)
   (values expr expr))
 
+;; TODO fix this for new representation.
+;; It should be simpler now so maybe I should just start over on the output.
+
 ;; diff-output -> string
 (define (diff-colorize tree)
   ;; diff-output -> string
@@ -222,7 +225,7 @@
                                  (string-append (diff-colorize-rec x indent-depth) acc))
                                ""
                                contents)]
-      [(OK `(,same ...)) (format-same same indent-depth)]
+      [(OK `(,same ...)) (format-same (stringify same) indent-depth)]
       [(ONLY-RIGHT `(,right ...)) (format-right right indent-depth)]
       [(ONLY-LEFT `(,left ...)) (format-left left indent-depth)]
       ;; should be impossible
@@ -256,27 +259,13 @@
   (show-diff '(we . compare)'(a . pair))
   (show-diff '(second-item . matches)'(pair-cdr . matches))
   ;; complex structure with a small difference higher up, then another difference lower down
-  (show-diff '(info ((players [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
-             '(thing ((players [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
   (show-diff '(same (nested list)) '(same (with different contents)))
-  (show-diff '(list
-               (HERE '(info) '(thing))
-               (list
-                (list
-                 (OK '(players))
-                 (list
-                  (OK '(player "brandon" 20 180))
-                  (list (OK '(player "kevin")) (HERE '(400) '(40)) (OK '(204)))
-                  (OK '("maxwell" 31 150))))))
-             '(list
-               (HERE '(info) '(thing))
-               (list
-                (list
-                 (OK '(players))
-                 (list
-                  (OK '((player "brandon" 20 180)))
-                  (list (OK '(player "kevin")) (HERE '(40) '(400)) (OK '(204)))
-                  (OK '(("maxwell" 31 150)))))))
-             )
+  (show-diff
+                 '(info
+                   ((players
+                     [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
+                 '(thing
+                   ((players
+                     [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
   )
 
