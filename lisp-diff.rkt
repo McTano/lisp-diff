@@ -19,27 +19,55 @@
 ;; (HERE s-expr s-expr)
 ;; complex s-expr with a HERE marker somewhere inside it.
 (define-type diff-output
+  [OK (val any/c)]
   ;; diff-marker
   [HERE (left any/c) (right any/c)]
+  [ONLY-LEFT (left list?)]
+  [ONLY-RIGHT (right list?)]
+  [list-diff (diffs list?)]
   ;; otherwise it's just the expression itself
   )
 
-;; s-expr s-expr -> diff-output
+;; diff and compare-lists are mutually recursive.
 
+;; s-expr s-expr -> diff-output
 (define (diff left right)
   (match `(,left ,right)
-    [`(,same ,same) same]
+    [pair-of-lists #:when (and (list? left) (list? right))
+              (compare-lists left right)]
+    [`(,same ,same) (OK same)]
+    #;
     [`(,(cons same-head ltail) ,(cons same-head rtail))
-     (cons same-head (diff ltail rtail))]
+       (cons same-head (diff ltail rtail))]
+    #;
     [`(,(cons lhead ltail) ,(cons rhead rtail))
-     (cons (diff lhead rhead) (diff ltail rtail))]
-    #;[`(,(cons lhead same-tail)
+       (cons (diff lhead rhead) (diff ltail rtail))]
+    #;
+    [`(,(cons lhead same-tail)
          ,(cons rhead same-tail))
        (let ([head-diff (diff lhead rhead)])
          (cons head-diff tail))
        ]
     [else
      (HERE left right)]))
+
+;; (list-of any) (list-of any) -> list-diff
+(define (compare-lists l r)
+  ;; (listof any) (listof any) -> 1 listof diff-output
+  (define (helper left right)
+    (match `(,left . ,right)
+      [`(() . ()) '()]
+      [`((,head ,tail ...) . ())
+       `(,(ONLY-LEFT left))]
+      [`(() . (,head ,tail ...))
+       `(,(ONLY-RIGHT right))]
+      [`((,lhead ,ltail ...) . (,rhead ,rtail ...)) (cons (diff lhead rhead)
+                                                          (helper ltail rtail))]
+      ))
+  (list-diff (helper l r)))
+
+(diff '(same (nested list)) '(same (with different contents)))
+
 
 (define OUTPUT-GREEN "\e[32m")
 (define OUTPUT-RED "\e[31m")
@@ -51,12 +79,13 @@
 (define (colorize new-color s current-color)
   (string-append new-color s current-color))
 
-(define greenify ((curry colorize) OUTPUT-GREEN))
+(define greenify ((curry string-append) OUTPUT-GREEN))
 (displayln (greenify "hello in green" RESET-OUTPUT-COLOR))
 (displayln "back to default color")
 
-(define (blue s) (colorize OUTPUT-BLUE s RESET-OUTPUT-COLOR))
-(define (red s) (colorize OUTPUT-RED s RESET-OUTPUT-COLOR))
+(define (blue s) (string-append OUTPUT-BLUE s RESET-OUTPUT-COLOR))
+(define (red s) (string-append OUTPUT-RED s RESET-OUTPUT-COLOR))
+(define (green s) (string-append OUTPUT-GREEN s RESET-OUTPUT-COLOR))
 
 ;; used to repeat a string n times as a new string.
 ;; like the * method in ruby.
@@ -68,7 +97,10 @@
     )
   )
 
-(define INDENT (*str " " 2))
+(define SPACE " ")
+(define INDENT-CHAR SPACE)
+(define INDENT-WIDTH 2)
+(define INDENT (*str INDENT-CHAR INDENT-WIDTH))
 
 ;; number string -> string
 (define (indent-to indent-depth str)
@@ -79,54 +111,77 @@
                  "\n")))
 
 ;; (color escape marker) s-expr number -> str
-(define (format-difference color expr indent-depth)
-  (string-append color
-                 (indent-to (add1 indent-depth)
-                            (stringify expr))
-                 "\n")
-  )
+(define format-difference (curry (λ (color expr indent-depth)
+                                   (string-append color
+                                                  (indent-to
+                                                   indent-depth
+                                                             (stringify expr))
+                                                  SPACE))))
 
-(define format-left ((curry format-difference) OUTPUT-BLUE))
-(define format-right ((curry format-difference) OUTPUT-RED))
+
 
 (define (stringify sexpr)
   (pretty-format sexpr #:mode 'display))
+
+;; expr -> 2 of the expression
+;; return the given expression twice
+(define (double expr)
+  (values expr expr))
+
 
 ;; diff-output -> string
 (define (diff-colorize tree)
   ;; diff-output -> string OR s-expr
   (define (diff-colorize-rec tree indent-depth)
+    (define format-left (format-difference OUTPUT-BLUE))
+    (define format-right (format-difference OUTPUT-RED))
+    (define format-same (format-difference OUTPUT-GREEN))
+    ;; (listof diff-output) -> 2 lists of strings?
+    (define (colorize-list diffs)
+      (match diffs
+        ['() (double "")]
+        [(list (ONLY-LEFT tail))
+         (displayln tail)
+         (values
+          (format-left tail 0)
+          "")]
+        [(list (ONLY-RIGHT tail))
+         (values
+          ""
+          (format-right tail 0))]
+        [`(,head ,tail ...)
+         (let-values ([(left-head right-head) (colorize-item-in-list head)]
+                      [(left-tail right-tail) (colorize-list tail)])
+           (values
+            (string-append left-head left-tail)
+            (string-append right-head right-tail)
+            ))]))
+    ;; diff-output -> 2 strings
+    (define (colorize-item-in-list d)
+      (match d
+        [(OK same) (double (format-same same 0))]
+        [(HERE left right)
+         (values
+          (format-left left 0)
+          (format-right right 0)
+          )]
+        [(list-diff diffs)
+         (colorize-list diffs)]
+        ))
+    ;; BODY OF diff-colorize-rec starts here
     (match tree
-      ;; special cases to handle the end of a list
-      [(HERE '() right)
-       (list (string-append "\n"
-                            (format-left '() indent-depth)
-                            (format-right right indent-depth)
-                            OUTPUT-GREEN))]
-      [(HERE left '())
-       (list (string-append "\n"
-                            (format-left left indent-depth)
-                            (format-right '() indent-depth)
-                            OUTPUT-GREEN))]
+      ;; Alternate list behaviour
+      [(list-diff diffs) (let-values ([(left right) (colorize-list diffs)])
+                           (string-append left "\n" right))]
       [(HERE left right)
        (string-append
         "\n"
-        (indent-to (add1 indent-depth) (format-left left indent-depth))
+        (format-left left (add1 indent-depth))
         "\n"
-        (indent-to (add1 indent-depth) (format-right right indent-depth))
-        "\n"
+        (format-right right (add1 indent-depth))
         OUTPUT-GREEN
         )]
-      ;; Cases
-      ;; head and tail are one-of:
-      ;;   (HERE left right)
-      ;;   s-expr containing diff-marker somewhere within
-      ;;   s-expr containing no diff-markers
-      [(cons head tail)
-       (cons (diff-colorize-rec head indent-depth)
-             (diff-colorize-rec tail indent-depth))]
-      ;;  should match anything
-      [atom atom]
+      [(OK same) (format-same same)]
       ;; should be impossible
       [else
        (error "unexpected case")]))
@@ -138,7 +193,6 @@
       (diff-colorize-rec tree 0)
       #:mode 'display)
      RESET-OUTPUT-COLOR))
-  
   (diff-colorize-main tree))
 
 (define show-diff (compose displayln diff-colorize diff))
@@ -154,12 +208,12 @@
   (check-equal? (diff '() '()) '())
   (check-equal? (diff '(1) '(2)) `(,(HERE 1 2))
                 )
-  (check-equal? (diff-colorize '(hello my friends))
+  #;(check-equal? (diff-colorize '(hello my friends))
                 "<span style=\"color:green\">
 (hello my friends)
 </span>
 ")
-  (check-equal? (diff-colorize (diff `(same
+  #;(check-equal? (diff-colorize (diff `(same
                                        (same))
                                      `(same
                                        (same (but different)))))
@@ -181,11 +235,12 @@
            '(first (second)
                    (third (something-else))))
 
-(show-diff '(same up to here then (HERE different stuff))
-           '(same up to here then (different stuff)))
+(show-diff '(same up to here then (list with multiple differences))
+           '(same up to here then (and different length)))
 (show-diff '(when the head is different and the tail is the same)
            '(but the head is different and the tail is the same))
-
+(show-diff 'single-symbol 'comparison)
+(show-diff '(we . compare)'(a . pair))
 
 
 
