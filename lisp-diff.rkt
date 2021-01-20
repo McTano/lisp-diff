@@ -168,16 +168,25 @@
 (define (double expr)
   (values expr expr))
 
-;; TODO fix this for new representation.
-;; It should be simpler now so maybe I should just start over on the output.
-
-;; diff-output -> string
-(define (diff-colorize tree)
-  ;; diff-output -> string
-  (define (diff-colorize-rec tree indent-depth)
     (define format-left (format-difference OUTPUT-BLUE))
     (define format-right (format-difference OUTPUT-RED))
     (define format-same (format-difference OUTPUT-GREEN))
+
+;; TODO fix this for new representation.
+;; It should be simpler now so maybe I should just start over on the output.
+
+(define (diff-colorize tree)
+  (match tree
+   ;; how do lists work now?
+    [(OK same) (format-same (foldl string-append "" same))]
+    [else (stringify tree)]))
+
+;; diff-output -> string
+#;
+(define (diff-colorize tree)
+  ;; diff-output -> string
+  (define (diff-colorize-rec tree indent-depth)
+
     ;; (listof diff-output) -> 2 lists of strings?
     #;(define (colorize-list diffs)
         (match diffs
