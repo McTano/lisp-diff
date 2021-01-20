@@ -32,22 +32,12 @@
 
 ;; s-expr s-expr -> diff-output
 (define (diff left right)
-  (match `(,left ,right)
+  (match `(,left . ,right)
+    [`(,same . ,same) (OK same)]
     [pair-of-lists #:when (and (list? left) (list? right))
               (compare-lists left right)]
-    [`(,same ,same) (OK same)]
-    #;
-    [`(,(cons same-head ltail) ,(cons same-head rtail))
-       (cons same-head (diff ltail rtail))]
-    #;
-    [`(,(cons lhead ltail) ,(cons rhead rtail))
-       (cons (diff lhead rhead) (diff ltail rtail))]
-    #;
-    [`(,(cons lhead same-tail)
-         ,(cons rhead same-tail))
-       (let ([head-diff (diff lhead rhead)])
-         (cons head-diff tail))
-       ]
+    [`((,lcar . ,lcdr) . (,rcar . ,rcdr))
+     `(,(diff lcar rcar) . ,(diff lcdr rcdr))]
     [else
      (HERE left right)]))
 
@@ -181,18 +171,17 @@
         (format-right right (add1 indent-depth))
         OUTPUT-GREEN
         )]
-      [(OK same) (format-same same)]
+      [(OK same) (format-same same indent-depth)]
       ;; should be impossible
+      [`(,card . ,cdrd) (stringify (cons
+                         (diff-colorize-rec card indent-depth)
+                         (diff-colorize-rec cdrd indent-depth)))]
       [else
        (error "unexpected case")]))
   
   (define (diff-colorize-main tree)
-    (string-append
-     OUTPUT-GREEN
-     (pretty-format
-      (diff-colorize-rec tree 0)
-      #:mode 'display)
-     RESET-OUTPUT-COLOR))
+    (green
+      (diff-colorize-rec tree 0)))
   (diff-colorize-main tree))
 
 (define show-diff (compose displayln diff-colorize diff))
@@ -241,6 +230,7 @@
            '(but the head is different and the tail is the same))
 (show-diff 'single-symbol 'comparison)
 (show-diff '(we . compare)'(a . pair))
+(show-diff '(second-item . matches)'(pair-cdr . matches))
 
 
 
