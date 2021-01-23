@@ -75,8 +75,8 @@
   (check-equal? (compare-lists '([consoles [dreamcast xbox-one ps4 switch]])
                                '([consoles [dreamcast xbox-one playstation]]))
                 `([,(OK '(consoles)) [,(OK '(dreamcast xbox-one))
-                                      ,(HERE '(ps4 playstation)
-                                             '(switch))]]))
+                                      ,(HERE '(ps4 switch)
+                                             '(playstation))]]))
   ;; pair handling
   (check-equal? (diff '(siskel . ebert)
                       '(ebert . roeper))
