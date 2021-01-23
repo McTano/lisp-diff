@@ -23,11 +23,18 @@
 ;; (cons atom s-expr)
 
 (define-type diff-output
-  [OK (val list?)]
+  [SAME* (vals list?)]
+  [SAME (val any/c)]
+  #;[SAME-VALUES (val list?)]
   ;; diff-marker
-  [HERE (left list?) (right list?)]
-  #;[list-diff (diffs list?)]
+  [DIFFERENT* (left list?) (right list?)]
+  [DIFFERENT (left any/c) (right any/c)]
   ;; diff-output can also be (listof diff-output)
+  [list-diff (diffs (λ (ls) (and (list? ls)
+                                 (andmap (λ (d) (or (diff-output? d)
+                                                    (pair? d))) ls))))]
+  ;; could also be:
+  ;; (cons diff-output diff-output)
   )
 
 ;; diff and compare-lists are mutually recursive.
@@ -35,53 +42,78 @@
 ;; s-expr s-expr -> diff-output
 (define (diff left right) 
   (match `(,left . ,right)
-    [`(,same . ,same) (OK `(,same))]
+    [`(,same . ,same) (SAME* same)]
     [pair-of-lists #:when (and (list? left) (list? right))
                    (compare-lists left right)]
     [`((,lcar . ,lcdr) . (,rcar . ,rcdr))
      (cons (diff lcar rcar) (diff lcdr rcdr))]
     [else
-     (HERE `(,left) `(,right))]))
+     (DIFFERENT left right)]))
+
+(define (compare-lists left right)
+  ;; list -> (list-of diff-output)
+  (define (compare-partial left right)
+    (match `(,left . ,right)
+      [`(() . ()) '()]
+      [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
+       #:when (equal? lheads rheads)
+       (cons (SAME* lheads)
+             (compare-lists ltail rtail))]
+      [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
+       #:when (and (list? lhead)
+                   (list? rhead))
+       (let ([head-diff (compare-lists lhead rhead)])
+         `(,(list-diff-diffs head-diff) ,@(compare-partial rtail rtail)))]
+      [else
+       `(,(DIFFERENT* left right))]
+      )
+    )
+  ;; list -> diff-output
+  (match `(,left . ,right)
+    [`(,same . ,same) (SAME left right)]
+    [else (list-diff (compare-partial left right))]))
 
 ;; (list-of any) (list-of any) -> (listof diff-output)
-(define (compare-lists left right)
-  (match `(,left . ,right)
-    [`(() . ()) '()]
-    #;[`((,head ,tail ...) . ())
-       `( ,(HERE left '()))]
-    #;[`(() . (,head ,tail ...))
-       `(,(HERE '() right))]
-    [`((,sames ..1 ,ltail ...) . (,sames2 ..1 ,rtail ...))
-     #:when (equal? sames sames2)
-     (cons (OK sames)
-           (compare-lists ltail rtail))]
-    [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
-     #:when (not (equal? lheads rheads))
-     (append (compare-lists lheads rheads)
+#;(define (compare-lists left right)
+    (match `(,left . ,right)
+      [`(() . ()) '()]
+      #;[`((,head ,tail ...) . ())
+         `( ,(HERE left '()))]
+      #;[`(() . (,head ,tail ...))
+         `(,(HERE '() right))]
+      [`((,sames ..1 ,ltail ...) . (,sames2 ..1 ,rtail ...))
+       #:when (equal? sames sames2)
+       (cons (SAME* sames)
              (compare-lists ltail rtail))]
-    [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
-     #:when (and (list? lhead) (list? rhead))
-     (cons (compare-lists lhead rhead)
-           (compare-lists ltail rtail))]
-    
-    
-    [else
-     `(,(HERE (list left)
-              (list right)))]
-    
-    ))
+      [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
+       #:when (not (equal? lheads rheads))
+       (append (compare-lists lheads rheads)
+               (compare-lists ltail rtail))]
+      [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
+       #:when (and (list? lhead) (list? rhead))
+       (cons (compare-lists lhead rhead)
+             (compare-lists ltail rtail))]
+      [else
+       `(,(DIFFERENT* (list left)
+                      (list right)))]
+      ))
+
+
 
 (module+ test
-  (check-equal? (compare-lists '([consoles [dreamcast xbox-one ps4 switch]])
-                               '([consoles [dreamcast xbox-one playstation]]))
-                `([,(OK '(consoles)) [,(OK '(dreamcast xbox-one))
-                                      ,(HERE '(ps4 switch)
-                                             '(playstation))]]))
   ;; pair handling
   (check-equal? (diff '(siskel . ebert)
                       '(ebert . roeper))
-                `(,(HERE '(siskel) '(ebert)) .
-                                             ,(HERE '(ebert) '(roeper))))
+                `(,(DIFFERENT 'siskel 'ebert) . ,(DIFFERENT 'ebert 'roeper)))
+  (check-equal? (diff '() '()) (SAME* '()))
+  (check-equal? (diff '() '(bless you)) (DIFFERENT* '() '(bless you)))
+  (check-equal? (diff '(right is empty) '()) (DIFFERENT* '(right is empty) '()))
+  
+  (check-equal? (compare-lists '([consoles [dreamcast xbox-one ps4 switch]])
+                               '([consoles [dreamcast xbox-one playstation]]))
+                `([,(SAME* '(consoles)) [,(SAME* '(dreamcast xbox-one))
+                                         ,(DIFFERENT* '(ps4 switch)
+                                                      '(playstation))]]))
   (check-equal? (diff
                  '(info
                    ((players
@@ -89,20 +121,16 @@
                  '(thing
                    ((players
                      [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
-                `(,(HERE '(info) '(thing))
-                  ((,(OK '(players))
-                    [,(OK '((player "brandon" 20 180)))
-                     (,(OK '(player "kevin"))
-                      ,(HERE '(40) '(400))
-                      ,(OK '(204)))
-                     ,(OK '(("maxwell" 31 150)))]))))
-  
+                `(,(DIFFERENT* '(info) '(thing))
+                  ((,(SAME* '(players))
+                    [,(SAME* '((player "brandon" 20 180)))
+                     (,(SAME* '(player "kevin"))
+                      ,(DIFFERENT* '(40) '(400))
+                      ,(SAME* '(204)))
+                     ,(SAME* '(("maxwell" 31 150)))]))))
   (check-equal? (diff '(same (nested list)) '(same (with different contents)))
-                `(,(OK '(same))
-                  ,(HERE '((nested list)) '((with different contents)))))
-  (check-equal? (diff '() '()) (OK '(())))
-  (check-equal? (diff '() '(bless you)) (HERE '(()) '((bless you))))
-  (check-equal? (diff '(right is empty) '()) (HERE '((right is empty)) '(())))
+                `(,(SAME* '(same))
+                  ,(DIFFERENT* '((nested list)) '((with different contents)))))
   )
 
 ;; list-of diff-output -> list-of diff-output
@@ -110,17 +138,17 @@
 (define (merge-diffs ls)
   (match ls
     ['() '()]
-    [`(,(OK oks) ..1 ,tail ...)
-     `(,(OK (foldr append '() oks))
+    [`(,(SAME* oks) ..1 ,tail ...)
+     `(,(SAME* (foldr append '() oks))
        ,@(merge-diffs tail))]
-    [(list (HERE `(,ls) `(,rs)) ..1 tail ... )
-     `(,(HERE ls rs) ,@(merge-diffs tail))]
+    [(list (DIFFERENT* `(,ls) `(,rs)) ..1 tail ... )
+     `(,(DIFFERENT* ls rs) ,@(merge-diffs tail))]
     ))
   
 
 (module+ test
-  (check-equal? (merge-diffs (list (OK '(there)) (OK '(are)) (OK '(four)) (HERE '(waffles) '(lights))))
-                (list (OK '(there are four)) (HERE '(waffles) '(lights)))))
+  (check-equal? (merge-diffs (list (SAME* '(there)) (SAME* '(are)) (SAME* '(four)) (DIFFERENT* '(waffles) '(lights))))
+                (list (SAME* '(there are four)) (DIFFERENT* '(waffles) '(lights)))))
 
 
 ;; used to repeat a string n times as a new string.
@@ -152,10 +180,10 @@
   (define (colorize-diff-rec tree color-context)
     (match tree
       ;; how do lists work now?
-      [(OK `(,same ...)) `(,OUTPUT-GREEN ,@same ,color-context)]
-      [(HERE left right) `(,OUTPUT-BLUE ,@left
-                                        ,OUTPUT-RED ,@right
-                                        ,color-context)]
+      [(SAME* `(,same ...)) `(,OUTPUT-GREEN ,@same ,color-context)]
+      [(DIFFERENT* left right) `(,OUTPUT-BLUE ,@left
+                                              ,OUTPUT-RED ,@right
+                                              ,color-context)]
       [(list things ...) (append (append-map
                                   (λ (expr) (colorize-diff-rec expr color-context))
                                   things)
@@ -165,10 +193,10 @@
       [else (error "don't understand how to colorize" tree)]))
   (define (colorize-diff-main tree)
     (match tree
-      [(OK `(,matching-values ...)) `(,OUTPUT-GREEN ,@(string-join matching-values " "))]
-      [(HERE left right) `(,OUTPUT-BLUE ,@left
-                                        ,OUTPUT-RED ,@right
-                                        ,RESET-OUTPUT-COLOR)]
+      [(SAME* `(,matching-values ...)) `(,OUTPUT-GREEN ,@(string-join matching-values " "))]
+      [(DIFFERENT* left right) `(,OUTPUT-BLUE ,@left
+                                              ,OUTPUT-RED ,@right
+                                              ,RESET-OUTPUT-COLOR)]
       [(cons head tail) (string-append
                          OUTPUT-GREEN
                          (pretty-format
