@@ -30,9 +30,7 @@
   [DIFFERENT* (left list?) (right list?)]
   [DIFFERENT (left any/c) (right any/c)]
   ;; diff-output can also be (listof diff-output)
-  [list-diff (diffs (λ (ls) (and (list? ls)
-                                 (andmap (λ (d) (or (diff-output? d)
-                                                    (pair? d))) ls))))]
+  [list-diff (diffs list?)]
   ;; could also be:
   ;; (cons diff-output diff-output)
   )
@@ -52,18 +50,18 @@
 
 (define (compare-lists left right)
   ;; list -> (list-of diff-output)
-  (define (compare-partial left right)
+  (define (compare-partials left right)
     (match `(,left . ,right)
       [`(() . ()) '()]
-      [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
+      [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
        #:when (equal? lheads rheads)
        (cons (SAME* lheads)
-             (compare-lists ltail rtail))]
+             (list-diff-diffs (compare-lists ltail rtail)))]
       [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
        #:when (and (list? lhead)
                    (list? rhead))
-       (let ([head-diff (compare-lists lhead rhead)])
-         `(,(list-diff-diffs head-diff) ,@(compare-partial rtail rtail)))]
+       (cons (compare-lists lhead rhead)
+             (compare-partials ltail rtail))]
       [else
        `(,(DIFFERENT* left right))]
       )
@@ -71,33 +69,7 @@
   ;; list -> diff-output
   (match `(,left . ,right)
     [`(,same . ,same) (SAME left right)]
-    [else (list-diff (compare-partial left right))]))
-
-;; (list-of any) (list-of any) -> (listof diff-output)
-#;(define (compare-lists left right)
-    (match `(,left . ,right)
-      [`(() . ()) '()]
-      #;[`((,head ,tail ...) . ())
-         `( ,(HERE left '()))]
-      #;[`(() . (,head ,tail ...))
-         `(,(HERE '() right))]
-      [`((,sames ..1 ,ltail ...) . (,sames2 ..1 ,rtail ...))
-       #:when (equal? sames sames2)
-       (cons (SAME* sames)
-             (compare-lists ltail rtail))]
-      [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
-       #:when (not (equal? lheads rheads))
-       (append (compare-lists lheads rheads)
-               (compare-lists ltail rtail))]
-      [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
-       #:when (and (list? lhead) (list? rhead))
-       (cons (compare-lists lhead rhead)
-             (compare-lists ltail rtail))]
-      [else
-       `(,(DIFFERENT* (list left)
-                      (list right)))]
-      ))
-
+    [else (list-diff (compare-partials left right))]))
 
 
 (module+ test
@@ -106,15 +78,25 @@
                       '(ebert . roeper))
                 `(,(DIFFERENT 'siskel 'ebert) . ,(DIFFERENT 'ebert 'roeper)))
   (check-equal? (diff '() '()) (SAME* '()))
-  (check-equal? (diff '() '(bless you)) (DIFFERENT* '() '(bless you)))
-  (check-equal? (diff '(right is empty) '()) (DIFFERENT* '(right is empty) '()))
-  
-  (check-equal? (compare-lists '([consoles [dreamcast xbox-one ps4 switch]])
-                               '([consoles [dreamcast xbox-one playstation]]))
-                `([,(SAME* '(consoles)) [,(SAME* '(dreamcast xbox-one))
-                                         ,(DIFFERENT* '(ps4 switch)
-                                                      '(playstation))]]))
-  (check-equal? (diff
+  (check-equal? (diff '() '(bless you)) (list-diff
+                                         (list (DIFFERENT* '() '(bless you)))))
+  (check-equal? (diff '(right is empty) '()) (list-diff
+                                              (list (DIFFERENT* '(right is empty) '()))))
+
+  (check-equal? (diff '[dreamcast xbox-one ps4 switch]
+                      '[dreamcast xbox-one playstation])
+                (list-diff
+                 `[,(SAME* '(dreamcast xbox-one))
+                   ,(DIFFERENT* '(ps4 switch)
+                                '(playstation))]))
+ (check-equal? (diff '([consoles [dreamcast xbox-one ps4 switch]])
+                      '([consoles [dreamcast xbox-one playstation]]))
+                (list-diff `(,(list-diff `[,(SAME* '(consoles))
+                                           ,(list-diff
+                                             `[,(SAME* '(dreamcast xbox-one))
+                                               ,(DIFFERENT* '(ps4 switch)
+                                                            '(playstation))])]))))
+ (check-equal? (diff
                  '(info
                    ((players
                      [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
