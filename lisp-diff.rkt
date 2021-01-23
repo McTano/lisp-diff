@@ -56,9 +56,9 @@
      (cons (OK sames)
            (compare-lists ltail rtail))]
     [`((,lheads ..1 ,ltail) . (,rheads ..1 ,rtail))
-       #:when (not (equal? lheads rheads))
-       (append (compare-lists lheads rheads)
-               (compare-lists ltail rtail))]
+     #:when (not (equal? lheads rheads))
+     (append (compare-lists lheads rheads)
+             (compare-lists ltail rtail))]
     [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
      #:when (and (list? lhead) (list? rhead))
      (cons (compare-lists lhead rhead)
