@@ -62,7 +62,17 @@
                    (list? rhead))
        (cons (compare-lists lhead rhead)
              (compare-partials ltail rtail))]
+      [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
+       #:when (and (equal? (length lheads)
+                           (length rheads))
+                   (andmap (λ (a b) (not (equal? a b))) lheads rheads))
+       (cons (DIFFERENT* lheads rheads)
+             (compare-partials ltail rtail))]
+      [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
+       (cons (diff lhead rhead)
+             (compare-partials ltail rtail))]
       [else
+       (displayln (~a left right #:separator "\n"))
        `(,(DIFFERENT* left right))]
       )
     )
@@ -89,14 +99,27 @@
                  `[,(SAME* '(dreamcast xbox-one))
                    ,(DIFFERENT* '(ps4 switch)
                                 '(playstation))]))
- (check-equal? (diff '([consoles [dreamcast xbox-one ps4 switch]])
+  (check-equal? (diff '([consoles [dreamcast xbox-one ps4 switch]])
                       '([consoles [dreamcast xbox-one playstation]]))
                 (list-diff `(,(list-diff `[,(SAME* '(consoles))
                                            ,(list-diff
                                              `[,(SAME* '(dreamcast xbox-one))
                                                ,(DIFFERENT* '(ps4 switch)
                                                             '(playstation))])]))))
- (check-equal? (diff
+  (check-equal? (diff '(info
+                        ((players
+                          ((player "brandon" 20 180)
+                           (player "kevin" 40 204)
+                           ("maxwell" 31 150)))))
+                      '(thing
+                        ((players
+                          ((player "brandon" 20 180)
+                           (player "kevin" 400 204)
+                           ("maxwell" 31 150))))))
+                (list-diff (list (DIFFERENT*
+                                   '(info) '(thing))
+                                 `((players ...)))))
+  (check-equal? (diff
                  '(info
                    ((players
                      [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
