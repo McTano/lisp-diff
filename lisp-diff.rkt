@@ -56,13 +56,13 @@
       [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
        #:when (equal? lheads rheads)
        (cons (SAME* lheads)
-             (list-diff-diffs (compare-lists ltail rtail)))]
+              (compare-partials ltail rtail))]
       [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
        #:when (and (list? lhead)
                    (list? rhead))
        (cons (compare-lists lhead rhead)
              (compare-partials ltail rtail))]
-      [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
+      [`((,lheads oo1 ,ltail ...) . (,rheads oo1 ,rtail ...))
        #:when (and (equal? (length lheads)
                            (length rheads))
                    (andmap (λ (a b) (not (equal? a b))) lheads rheads))
@@ -78,7 +78,8 @@
     )
   ;; list -> diff-output
   (match `(,left . ,right)
-    [`(,same . ,same) (SAME left right)]
+    [`(() ()) `()]
+    [`(,same . ,same) (SAME left)]
     [else (list-diff (compare-partials left right))]))
 
 
