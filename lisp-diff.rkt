@@ -40,7 +40,7 @@
 ;; s-expr s-expr -> diff-output
 (define (diff left right) 
   (match `(,left . ,right)
-    [`(,same . ,same) (SAME* same)]
+    [`(,same . ,same) (SAME same)]
     [pair-of-lists #:when (and (list? left) (list? right))
                    (compare-lists left right)]
     [`((,lcar . ,lcdr) . (,rcar . ,rcdr))
@@ -53,10 +53,16 @@
   (define (compare-partials left right)
     (match `(,left . ,right)
       [`(() . ()) '()]
+      ;; pair
+      [`((,l1 . ,l2) (,r1 . r2))
+       #:when (and (not (list? left))
+                   (not (list? right)))
+       `(,(diff l1 r1)
+         . (diff l2 r2))]
       [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
        #:when (equal? lheads rheads)
        (cons (SAME* lheads)
-              (compare-partials ltail rtail))]
+             (compare-partials ltail rtail))]
       [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
        #:when (and (list? lhead)
                    (list? rhead))
@@ -72,7 +78,6 @@
        (cons (diff lhead rhead)
              (compare-partials ltail rtail))]
       [else
-       (displayln (~a left right #:separator "\n"))
        `(,(DIFFERENT* left right))]
       )
     )
@@ -118,7 +123,7 @@
                            (player "kevin" 400 204)
                            ("maxwell" 31 150))))))
                 (list-diff (list (DIFFERENT*
-                                   '(info) '(thing))
+                                  '(info) '(thing))
                                  `((players ...)))))
   (check-equal? (diff
                  '(info
@@ -179,9 +184,35 @@
                                             s))
                       lines)
                  "\n")))
+;; diff-output -> string
+(define (colorize-diff tree)
+  (define (colorize-diff tree color-context)
+    (match tree
+      [(SAME* `(,same-values ...)) `(,OUTPUT-GREEN ,same-values ,color-context )]
+      [(SAME val) (~a OUTPUT-GREEN (~a val #:separator " ") color-context)]
+      [(DIFFERENT left right)  (~a ""
+                                   (~a (~a OUTPUT-BLUE
+                                           left)
+                                       (~a OUTPUT-RED
+                                           right)
+                                       #:separator " ")
+                                   color-context)]
+      [(DIFFERENT* left right) `( ,OUTPUT-BLUE
+                                  ,@left
+                                  ,OUTPUT-RED
+                                  ,@right
+                                  ,color-context)]
+      [(list-diff ls) (map (λ (d) (colorize-diff d color-context)) ls)]
+      [(cons d1 d2) `(,(colorize-diff d1 color-context) . ,(colorize-diff d2 color-context))]
+      [else "TODO"]))
+  (~a OUTPUT-GREEN
+      (colorize-diff tree OUTPUT-GREEN)
+      RESET-OUTPUT-COLOR
+      "\n")
+  )
 
 ;; There's a bug in here dropping some brackets.
-
+#;
 (define (colorize-diff tree)
   (define (colorize-diff-rec tree color-context)
     (match tree
@@ -218,32 +249,32 @@
 
 (define show-diff (compose display colorize-diff diff))
 
-#;(module+ test
-    (show-diff  `(same
-                  (same))
-                `(same
-                  (same '(but different))))
+(module+ test
+  (show-diff  `(same
+                (same))
+              `(same
+                (same (but different))))
 
-    (show-diff '(first (second)
-                       (third something))
-               '(first (second)
-                       (third (something-else))))
+  (show-diff '(first (second)
+                     (third something))
+             '(first (second)
+                     (third (something-else))))
 
-    (show-diff '(same up to here then (list with multiple differences))
-               '(same up to here then (and different length)))
-    (show-diff '(when the head is different and the tail is the same)
-               '(but the head is different and the tail is the same))
-    (show-diff 'single-symbol 'comparison)
-    (show-diff '(we . compare)'(a . pair))
-    (show-diff '(second-item . matches)'(pair-cdr . matches))
-    ;; complex structure with a small difference higher up, then another difference lower down
-    (show-diff '(same (nested list)) '(same (with different contents)))
-    (show-diff
-     '(info
-       ((players
-         [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
-     '(thing
-       ((players
-         [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
-    )
+  (show-diff '(same up to here then (list with multiple differences))
+             '(same up to here then (and different length)))
+  (show-diff '(when the head is different and the tail is the same)
+             '(but the head is different and the tail is the same))
+  (show-diff 'single-symbol 'comparison)
+  (show-diff '(we . compare)'(a . pair))
+  (show-diff '(second-item . matches) '(pair-cdr . matches))
+  ;; complex structure with a small difference higher up, then another difference lower down
+  (show-diff '(same (nested list)) '(same (with different contents)))
+  (show-diff
+   '(info
+     ((players
+       [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
+   '(thing
+     ((players
+       [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
+  )
 
