@@ -232,8 +232,7 @@
   (define (colorize-diff-rec tree color-context)
     (match tree
       [(SAME val) (~a OUTPUT-GREEN (~a val #:separator " ") color-context)]
-      [(DIFFERENT left right)  (~a ""
-                                   (~a (~a OUTPUT-BLUE
+      [(DIFFERENT left right)  (~a (~a (~a OUTPUT-BLUE
                                            left)
                                        (~a OUTPUT-RED
                                            right)
