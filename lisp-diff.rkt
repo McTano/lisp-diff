@@ -17,6 +17,15 @@
 (define OUTPUT-YELLOW "\u001b[33m")
 (define RESET-OUTPUT-COLOR "\e[0m")
 
+(define (list-diff-contents? contents)
+  (and (list? contents)
+       (andmap (λ (el)
+                 (or (list-diff? el)
+                     (pair? el)
+                     (SAME*? el)
+                     (DIFFERENT*? el)))
+               contents)))
+
 ;; s-expr is one-of:
 ;; the empty list: '()
 ;; a symbol
@@ -30,7 +39,7 @@
   [DIFFERENT* (left list?) (right list?)]
   [DIFFERENT (left any/c) (right any/c)]
   ;; diff-output can also be (listof diff-output)
-  [list-diff (diffs list?)]
+  [list-diff (diffs list-diff-contents?)]
   ;; could also be:
   ;; (cons diff-output diff-output)
   )
@@ -59,10 +68,12 @@
                    (not (list? right)))
        `(,(diff l1 r1)
          . (diff l2 r2))]
+      ;; lists begin with some matching values
       [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
        #:when (equal? lheads rheads)
        (cons (SAME* lheads)
              (compare-partials ltail rtail))]
+      ;; lists starts with (unequal) lists
       [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
        #:when (and (list? lhead)
                    (list? rhead))
@@ -75,7 +86,8 @@
        (cons (DIFFERENT* lheads rheads)
              (compare-partials ltail rtail))]
       [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
-       (cons (diff lhead rhead)
+       #:when (not (equal? lhead rhead))
+       (cons (DIFFERENT* `(,lhead) `(,rhead))
              (compare-partials ltail rtail))]
       [else
        `(,(DIFFERENT* left right))]
@@ -93,7 +105,7 @@
   (check-equal? (diff '(siskel . ebert)
                       '(ebert . roeper))
                 `(,(DIFFERENT 'siskel 'ebert) . ,(DIFFERENT 'ebert 'roeper)))
-  (check-equal? (diff '() '()) (SAME* '()))
+  (check-equal? (diff '() '()) (SAME '()))
   (check-equal? (diff '() '(bless you)) (list-diff
                                          (list (DIFFERENT* '() '(bless you)))))
   (check-equal? (diff '(right is empty) '()) (list-diff
@@ -102,46 +114,49 @@
   (check-equal? (diff '[dreamcast xbox-one ps4 switch]
                       '[dreamcast xbox-one playstation])
                 (list-diff
-                 `[,(SAME* '(dreamcast xbox-one))
-                   ,(DIFFERENT* '(ps4 switch)
-                                '(playstation))]))
+                 [list (SAME* '(dreamcast xbox-one))
+                       (DIFFERENT* '(ps4) '(playstation))
+                       (DIFFERENT* '(switch) '())]))
   (check-equal? (diff '([consoles [dreamcast xbox-one ps4 switch]])
                       '([consoles [dreamcast xbox-one playstation]]))
                 (list-diff `(,(list-diff `[,(SAME* '(consoles))
                                            ,(list-diff
-                                             `[,(SAME* '(dreamcast xbox-one))
-                                               ,(DIFFERENT* '(ps4 switch)
-                                                            '(playstation))])]))))
-  (check-equal? (diff '(info
-                        ((players
-                          ((player "brandon" 20 180)
-                           (player "kevin" 40 204)
-                           ("maxwell" 31 150)))))
-                      '(thing
-                        ((players
-                          ((player "brandon" 20 180)
-                           (player "kevin" 400 204)
-                           ("maxwell" 31 150))))))
-                (list-diff (list (DIFFERENT*
-                                  '(info) '(thing))
-                                 `((players ...)))))
+                                             [list (SAME* '(dreamcast xbox-one))
+                                                   (DIFFERENT* '(ps4) '(playstation))
+                                                   (DIFFERENT* '(switch) '())])]))))
   (check-equal? (diff
                  '(info
                    ((players
-                     [(player "brandon" 20 180) (player "kevin" 40 204) ("maxwell" 31 150)])))
+                     [(player "brandon" 20 180)
+                      (player "kevin" 40 204)
+                      ("maxwell" 31 150)])))
                  '(thing
                    ((players
-                     [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
-                `(,(DIFFERENT* '(info) '(thing))
-                  ((,(SAME* '(players))
-                    [,(SAME* '((player "brandon" 20 180)))
-                     (,(SAME* '(player "kevin"))
-                      ,(DIFFERENT* '(40) '(400))
-                      ,(SAME* '(204)))
-                     ,(SAME* '(("maxwell" 31 150)))]))))
+                     [(player "brandon" 20 180)
+                      (player "kevin" 400 204)
+                      ("maxwell" 31 150)]))))
+                (list-diff
+                 (list
+                  (DIFFERENT* '(info) '(thing))
+                  (list-diff
+                   (list
+                    (list-diff
+                     (list
+                      (SAME* '(players))
+                      (list-diff
+                       [list
+                        (SAME* '((player "brandon" 20 180)))
+                        (list-diff
+                         (list
+                          (SAME* '(player "kevin"))
+                          (DIFFERENT* '(40) '(400))
+                          (SAME* '(204))))
+                        (SAME* '(("maxwell" 31 150)))]))))))))
   (check-equal? (diff '(same (nested list)) '(same (with different contents)))
-                `(,(SAME* '(same))
-                  ,(DIFFERENT* '((nested list)) '((with different contents)))))
+                (list-diff
+                 (list
+                  (SAME* '(same))
+                  (DIFFERENT* '((nested list)) '((with different contents))))))
   )
 
 ;; list-of diff-output -> list-of diff-output
@@ -186,9 +201,36 @@
                  "\n")))
 ;; diff-output -> string
 (define (colorize-diff tree)
-  (define (colorize-diff tree color-context)
+  ;; partial -> list
+  (define (colorize-partial part color-context)
+    (match part
+      [(SAME* `(,same-values ...)) `(,OUTPUT-GREEN
+                                     ,@same-values
+                                     ,color-context )]
+      [(DIFFERENT* left right)     `(,OUTPUT-BLUE
+                                     ,@left
+                                     ,OUTPUT-RED
+                                     ,@right
+                                     ,color-context)]
+      [lsd #:when (list-diff? lsd) (list (colorize-list-diff lsd color-context))]
+      ;; TODO: handle pairs
+      #;[(cons fst snd) #:when (not (list? tree))
+                        (error "TODO; Handle pairs like " part)
+                        (list (cons (colorize-diff-rec fst color-context)
+                                    (colorize-diff-rec snd color-context)))]
+      [else (error "expected SAME* or DIFFERENT*, got " part)]))
+  ;; list-diff -> list
+  (define (colorize-list-diff lsd color-context)
+    (match lsd
+      [(list-diff contents) #:when (list? contents)
+                            (foldr (λ (d acc) (append
+                                               (colorize-partial d color-context)
+                                               acc)) '() contents)]
+      [else (error "expected list-diff containing list, got: " lsd)]
+      ))
+  ;; diff-output -> string
+  (define (colorize-diff-rec tree color-context)
     (match tree
-      [(SAME* `(,same-values ...)) `(,OUTPUT-GREEN ,same-values ,color-context )]
       [(SAME val) (~a OUTPUT-GREEN (~a val #:separator " ") color-context)]
       [(DIFFERENT left right)  (~a ""
                                    (~a (~a OUTPUT-BLUE
@@ -197,59 +239,33 @@
                                            right)
                                        #:separator " ")
                                    color-context)]
-      [(DIFFERENT* left right) `( ,OUTPUT-BLUE
-                                  ,@left
-                                  ,OUTPUT-RED
-                                  ,@right
-                                  ,color-context)]
-      [(list-diff ls) (map (λ (d) (colorize-diff d color-context)) ls)]
-      [(cons d1 d2) `(,(colorize-diff d1 color-context) . ,(colorize-diff d2 color-context))]
-      [else "TODO"]))
+
+      [lsd #:when (list-diff? lsd) (~a (colorize-list-diff lsd color-context))]
+      [(cons d1 d2) `(,(colorize-diff-rec d1 color-context) . ,(colorize-diff-rec d2 color-context))]
+      [else (error "Unexpected input: " tree)]))
   (~a OUTPUT-GREEN
-      (colorize-diff tree OUTPUT-GREEN)
+      (colorize-diff-rec tree OUTPUT-GREEN)
       RESET-OUTPUT-COLOR
       "\n")
   )
 
-;; There's a bug in here dropping some brackets.
-#;
-(define (colorize-diff tree)
-  (define (colorize-diff-rec tree color-context)
-    (match tree
-      ;; how do lists work now?
-      [(SAME* `(,same ...)) `(,OUTPUT-GREEN ,@same ,color-context)]
-      [(DIFFERENT* left right) `(,OUTPUT-BLUE ,@left
-                                              ,OUTPUT-RED ,@right
-                                              ,color-context)]
-      [(list things ...) (append (append-map
-                                  (λ (expr) (colorize-diff-rec expr color-context))
-                                  things)
-                                 `(,color-context))]
-      [(cons head tail) (append (colorize-diff-rec head color-context)
-                                (colorize-diff-rec tail color-context))]
-      [else (error "don't understand how to colorize" tree)]))
-  (define (colorize-diff-main tree)
-    (match tree
-      [(SAME* `(,matching-values ...)) `(,OUTPUT-GREEN ,@(string-join matching-values " "))]
-      [(DIFFERENT* left right) `(,OUTPUT-BLUE ,@left
-                                              ,OUTPUT-RED ,@right
-                                              ,RESET-OUTPUT-COLOR)]
-      [(cons head tail) (string-append
-                         OUTPUT-GREEN
-                         (pretty-format
-                          (append (colorize-diff-rec head OUTPUT-GREEN)
-                                  (colorize-diff-rec tail OUTPUT-GREEN))
-                          #:mode 'display)
-                         RESET-OUTPUT-COLOR
-                         )]
-      [else (string-append OUTPUT-GREEN
-                           (pretty-format tree #:mode 'display)
-                           RESET-OUTPUT-COLOR)]))
-  (colorize-diff-main tree))
-
-(define show-diff (compose display colorize-diff diff))
+(define show-diff (compose displayln colorize-diff diff))
 
 (module+ test
+  (check-equal? (colorize-diff
+                 (list-diff (list
+                             (DIFFERENT* '(a b c) '(1 2 3))
+                             (SAME* '(end of list)))))
+                (~a OUTPUT-GREEN
+                    (list
+                     OUTPUT-BLUE 'a 'b 'c
+                     OUTPUT-RED 1 2 3
+                     OUTPUT-GREEN
+                     OUTPUT-GREEN 'end 'of 'list
+                     OUTPUT-GREEN
+                     )
+                    RESET-OUTPUT-COLOR
+                    "\n"))
   (show-diff  `(same
                 (same))
               `(same
