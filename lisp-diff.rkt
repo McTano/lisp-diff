@@ -1,14 +1,15 @@
 #! /usr/bin/racket
 #lang racket
+
 (require rackunit)
 (require plai/datatype)
-(provide (rename-out [display-diff display-lisp-diff])
-                     )
+(provide  display-diff
+         )
 
 ;; Constants
 (define OUTPUT-GREEN "\e[32m")
-(define OUTPUT-RED "\e[31m")
-(define OUTPUT-BLUE "\e[36m")
+(define OUTPUT-RED "\n\e[31m")
+(define OUTPUT-BLUE "\n\e[36m")
 (define OUTPUT-PINK "\e[35m")
 (define OUTPUT-YELLOW "\u001b[33m")
 (define RESET-OUTPUT-COLOR "\e[0m")
@@ -19,6 +20,7 @@
   (and (list? contents)
        (andmap (λ (el)
                  (or (list-diff? el)
+                     (set-diff? el)
                      (pair? el)
                      (partial? el)))
                contents)))
@@ -31,6 +33,8 @@
   [list-diff (diffs list-diff-contents?)]
   ;; could also be a pair:
   ;; (cons diff-output diff-output)
+  ;; sets
+  [set-diff (shared any/c) (left-only any/c) (right any/c)]
   )
 
 ;; represent portion of a list containing sub-expressions
@@ -46,13 +50,31 @@
 ;; compare-expressions and compare-lists are mutually recursive.
 (define (compare-expressions left right) 
   (match `(,left . ,right)
+    [pair-of-sets #:when (and (set? left)
+                              (set? right))
+                  (compare-sets left right)]
     [`(,same . ,same) (SAME same)]
-    [pair-of-lists #:when (and (list? left) (list? right))
+    [pair-of-lists #:when (and (list? left)
+                               (list? right))
                    (compare-lists left right)]
     [`((,lcar . ,lcdr) . (,rcar . ,rcdr))
      (cons (compare-expressions lcar rcar) (compare-expressions lcdr rcdr))]
     [else
      (DIFFERENT left right)]))
+
+;; set set -> set-output
+(define (compare-sets left right)
+  ;;  [set-diff (shared any/c) (left-only any/c) (right any/c)]
+  (let ([shared (set-intersect left right)]
+        [left-only (set-subtract left right)]
+        [right-only (set-subtract right left)])
+    (set-diff shared left-only right-only))
+  #;(cond
+      ;; left < right
+      ;; left > right
+      ;; disjoint
+      [else (error "unexpected case")])
+  )
 
 ;; list -> list-diff
 (define (compare-lists left right)
@@ -66,6 +88,7 @@
                    (not (list? right)))
        `(,(compare-expressions l1 r1)
          . (diff l2 r2))]
+     
       ;; lists begin with some matching values
       [`((,lheads ..1 ,ltail ...) . (,rheads ..1 ,rtail ...))
        #:when (equal? lheads rheads)
@@ -76,6 +99,12 @@
        #:when (and (list? lhead)
                    (list? rhead))
        (cons (compare-lists lhead rhead)
+             (compare-partials ltail rtail))]
+      ;; both start with a set
+      [`((,lhead ,ltail ...) . (,rhead ,rtail ...))
+       #:when (and (set? lhead)
+                   (set? rhead))
+       (cons (compare-sets lhead rhead)
              (compare-partials ltail rtail))]
       [`((,lheads oo1 ,ltail ...) . (,rheads oo1 ,rtail ...))
        #:when (and (equal? (length lheads)
@@ -101,22 +130,22 @@
 (module+ test
   ;; pair handling
   (check-equal? (compare-expressions '(siskel . ebert)
-                      '(ebert . roeper))
+                                     '(ebert . roeper))
                 `(,(DIFFERENT 'siskel 'ebert) . ,(DIFFERENT 'ebert 'roeper)))
   (check-equal? (compare-expressions '() '()) (SAME '()))
   (check-equal? (compare-expressions '() '(bless you)) (list-diff
-                                         (list (DIFFERENT* '() '(bless you)))))
+                                                        (list (DIFFERENT* '() '(bless you)))))
   (check-equal? (compare-expressions '(right is empty) '()) (list-diff
-                                              (list (DIFFERENT* '(right is empty) '()))))
+                                                             (list (DIFFERENT* '(right is empty) '()))))
 
   (check-equal? (compare-expressions '[dreamcast xbox-one ps4 switch]
-                      '[dreamcast xbox-one playstation])
+                                     '[dreamcast xbox-one playstation])
                 (list-diff
                  [list (SAME* '(dreamcast xbox-one))
                        (DIFFERENT* '(ps4) '(playstation))
                        (DIFFERENT* '(switch) '())]))
   (check-equal? (compare-expressions '([consoles [dreamcast xbox-one ps4 switch]])
-                      '([consoles [dreamcast xbox-one playstation]]))
+                                     '([consoles [dreamcast xbox-one playstation]]))
                 (list-diff `(,(list-diff `[,(SAME* '(consoles))
                                            ,(list-diff
                                              [list (SAME* '(dreamcast xbox-one))
@@ -150,6 +179,11 @@
                           (DIFFERENT* '(40) '(400))
                           (SAME* '(204))))
                         (SAME* '(("maxwell" 31 150)))]))))))))
+  ;; Adjacent differences don't get merged.
+  ;; changing the match on unequal list prefixes to lazy instead of greedy makes this work
+  ;; but it breaks some cases where we want to go deeper into the list elements that are unequal
+  ;; and find as much similarity as possible.
+  #;
   (check-equal? (compare-expressions '(same (nested list)) '(same (with different contents)))
                 (list-diff
                  (list
@@ -171,6 +205,7 @@
                                      ,@right
                                      ,color-context)]
       [lsd #:when (list-diff? lsd) (list (colorize-list-diff lsd color-context))]
+      [sd #:when (set-diff? sd) (list (colorize-set-diff sd color-context))]
       ;; TODO: handle pairs
       #;[(cons fst snd) #:when (not (list? tree))
                         (error "TODO; Handle pairs like " part)
@@ -180,15 +215,26 @@
   ;; list-diff -> list
   (define (colorize-list-diff lsd color-context)
     (match lsd
-      [(list-diff contents) #:when (list? contents)
-                            (foldr (λ (d acc) (append
-                                               (colorize-partial d color-context)
-                                               acc)) '() contents)]
+      [(list-diff contents) 
+       (foldr (λ (d acc) (append
+                          (colorize-partial d color-context)
+                          acc)) '() contents)]
       [else (error "expected list-diff containing list, got: " lsd)]
       ))
+  ;; set-diff -> list
+  (define (colorize-set-diff sd color-context)
+    (match sd
+      [(set-diff shared left-only right-only) `(g"set"
+                                                 ,@(set->list shared)
+                                                 ,OUTPUT-BLUE
+                                                 ,@(set->list left-only)
+                                                 ,OUTPUT-RED
+                                                 ,@(set->list right-only))]
+      [else (error "expected set-diff, got: ")]))
   ;; diff-output -> string
   (define (colorize-diff-rec tree color-context)
     (match tree
+      [sd #:when (set-diff? sd) (colorize-set-diff sd color-context)]
       [(SAME val) (~a OUTPUT-GREEN (~a val #:separator " ") color-context)]
       [(DIFFERENT left right)  (~a (~a (~a OUTPUT-BLUE
                                            left)
@@ -225,19 +271,19 @@
                     RESET-OUTPUT-COLOR
                     "\n"))
   (display-diff  `(same
-                (same))
-              `(same
-                (same (but different))))
+                   (same))
+                 `(same
+                   (same (but different))))
 
   (display-diff '(first (second)
-                     (third something))
-             '(first (second)
-                     (third (something-else))))
+                        (third something))
+                '(first (second)
+                        (third (something-else))))
 
   (display-diff '(same up to here then (list with multiple differences))
-             '(same up to here then (and different length)))
+                '(same up to here then (and different length)))
   (display-diff '(when the head is different and the tail is the same)
-             '(but the head is different and the tail is the same))
+                '(but the head is different and the tail is the same))
   (display-diff 'single-symbol 'comparison)
   (display-diff '(we . compare)'(a . pair))
   (display-diff '(second-item . matches) '(pair-cdr . matches))
@@ -250,5 +296,27 @@
    '(thing
      ((players
        [(player "brandon" 20 180) (player "kevin" 400 204) ("maxwell" 31 150)]))))
+  ;; equal sets
+  (display-diff `(results ,(set 5 7 13))
+                `(results ,(set 7 5 13)))
+  ;; disjoint
+  (display-diff `(results ,(set 1 2 3))
+                `(results ,(set 4 5 6)))
+  ;; first < second
+  (display-diff `(results ,(set 5 7 13))
+                `(results ,(set 7 5 13 11 3)))
+  ;; first > second
+  (display-diff `(results ,(set 5 6 7 13))
+                `(results ,(set 13)))
+  (display-diff '(info
+                  ((players
+                    [(player "brandon" 20 180)
+                     (player "kevin" 40 204)
+                     ("maxwell" 31 150)])))
+                '(thing
+                  ((players
+                    [(player "brandon" 20 180)
+                     (player "kevin" 400 204)
+                     ("maxwell" 31 150)]))))
   )
 
